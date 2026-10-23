@@ -88,14 +88,14 @@ def initialize_authentication():
 
 
 def bootstrap_admin_account():
-    """Create the first administrator only from deployment secrets, never from public UI."""
+    """Provision the deployment administrator from Secrets and keep its password in sync."""
     admin_email = get_app_setting("OTC_ADMIN_EMAIL").lower()
     admin_password = get_app_setting("OTC_ADMIN_PASSWORD")
     if not admin_email or not admin_password:
         return
     with get_database_connection() as connection:
         existing = connection.execute(
-            "SELECT 1 FROM app_users WHERE email = ?", (admin_email,)
+            "SELECT user_id, role FROM app_users WHERE email = ?", (admin_email,)
         ).fetchone()
         if existing is None:
             salt, password_hash = hash_password(admin_password)
@@ -105,6 +105,14 @@ def bootstrap_admin_account():
                 VALUES (?, ?, ?, 'Administrator')
                 """,
                 (admin_email, salt, password_hash),
+            )
+        elif existing[1] == "Administrator":
+            # The deployment secret is the source of truth for the initial admin.
+            # This also safely fixes a password changed in Streamlit Secrets.
+            salt, password_hash = hash_password(admin_password)
+            connection.execute(
+                "UPDATE app_users SET password_salt = ?, password_hash = ? WHERE user_id = ?",
+                (salt, password_hash, existing[0]),
             )
 
 
